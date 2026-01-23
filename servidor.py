@@ -57,12 +57,20 @@ def run_server():
             else:
                 print(f"[R] Duplicado descartado: Seq={pkt.seq_num}")
 
+            # --- CONTROLE DE FLUXO (QUESTÃO 3) ---
+            # Calcula janela disponível dinamicamente
+            bytes_no_buffer = sum(len(payload) for payload in recv_buffer.values())
+            janela_disponivel = max(0, BUFFER_SIZE - bytes_no_buffer)
+            
+            if bytes_no_buffer > 0:
+                print(f"[FLOW] Buffer: {bytes_no_buffer}b usado, Janela={janela_disponivel}b")
+
             # --- ENVIO DO ACK (REQUISITO 2 - CUMULATIVO) ---
             # Sempre confirmamos o que estamos esperando receber a seguir
             ack_pkt = Packet(seq_num=0, 
                              ack_num=expected_seq, 
                              flags=ACK, 
-                             window=BUFFER_SIZE)
+                             window=janela_disponivel)
             sock.sendto(ack_pkt.to_bytes(), addr)
 
         except Exception as e:

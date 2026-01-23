@@ -298,21 +298,245 @@ def teste_questao_2():
 
 
 # =============================================================================
-# QUESTÃO 3: [Adicionar descrição quando implementar]
+# QUESTÃO 3: Controle de fluxo (janela do destinatário)
 # =============================================================================
 
 def teste_questao_3():
     """
-    [Descrição do teste da questão 3]
+    Testa o controle de fluxo baseado na janela do receptor.
+    
+    Cenário de teste:
+    - Verifica se servidor anuncia janela disponível nos ACKs
+    - Envia pacotes fora de ordem para encher o buffer
+    - Verifica se janela diminui quando buffer enche
+    - Verifica se janela aumenta quando buffer esvazia
     """
     print("\n" + "="*70)
-    print("TESTE - QUESTÃO 3: [Título]")
+    print("TESTE - QUESTÃO 3: Controle de Fluxo (Janela do Receptor)")
     print("="*70)
     
-    # TODO: Implementar teste da questão 3
-    print("Teste ainda não implementado")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2.0)
     
+    # Teste 3.1: Verificação da janela inicial
+    print("\n[Teste 3.1] Verificando janela inicial anunciada pelo servidor...")
+    print(f"Observação: Janela inicial deve ser {BUFFER_SIZE} bytes")
+    
+    base_seq = 100
+    msg = "TesteJanela".encode()
+    pkt = Packet(seq_num=base_seq, ack_num=0, flags=0, window=0, payload=msg)
+    
+    print(f"  → Enviando pacote (seq={base_seq})")
+    sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+    
+    try:
+        data, addr = sock.recvfrom(BUFFER_SIZE)
+        ack_pkt = Packet.from_bytes(data)
+        print(f"  ← ACK: ack_num={ack_pkt.ack_num}, window={ack_pkt.window}b")
+        
+        if ack_pkt.window == BUFFER_SIZE:
+            print(f"  ✓ Janela inicial correta: {BUFFER_SIZE}b")
+        else:
+            print(f"  ✗ Janela incorreta! Esperado={BUFFER_SIZE}, Recebido={ack_pkt.window}")
+    except socket.timeout:
+        print("  ✗ Timeout")
+    
+    base_seq += len(msg)
+    time.sleep(0.3)
+    
+    # Teste 3.2: Encher o buffer com pacotes fora de ordem
+    print("\n[Teste 3.2] Enchendo buffer com pacotes FORA de ordem...")
+    print("Observação: Janela deve DIMINUIR conforme buffer enche")
+    
+    # Criar 10 pacotes mas enviar fora de ordem (pular o primeiro)
+    # Isso fará com que todos fiquem no buffer
+    num_pacotes = 10
+    tamanho_payload = 50  # 50 bytes cada
+    
+    print(f"  Criando {num_pacotes} pacotes de {tamanho_payload}b cada ({num_pacotes * tamanho_payload}b total)")
+    
+    # Guardar o primeiro pacote para enviar por último
+    primeiro_seq = base_seq
+    primeiro_payload = b"P" * tamanho_payload
+    
+    # Enviar pacotes 2 a 10 (pular o primeiro)
+    janelas_observadas = []
+    
+    for i in range(1, num_pacotes):
+        seq = base_seq + (i * tamanho_payload)
+        payload = bytes([ord('A') + i]) * tamanho_payload
+        pkt = Packet(seq_num=seq, ack_num=0, flags=0, window=0, payload=payload)
+        
+        print(f"  → Enviando pacote {i+1} (seq={seq}) - FORA DE ORDEM")
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        try:
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            janelas_observadas.append(ack_pkt.window)
+            print(f"  ← ACK: ack_num={ack_pkt.ack_num}, window={ack_pkt.window}b")
+            
+            # Calcula espaço esperado no buffer
+            bytes_esperados_buffer = i * tamanho_payload
+            janela_esperada = BUFFER_SIZE - bytes_esperados_buffer
+            
+            if ack_pkt.window == janela_esperada:
+                print(f"  ✓ Janela correta! Buffer tem ~{bytes_esperados_buffer}b, janela={ack_pkt.window}b")
+            else:
+                print(f"  ! Janela={ack_pkt.window}b (esperado ~{janela_esperada}b)")
+                
+        except socket.timeout:
+            print("  ✗ Timeout")
+        
+        time.sleep(0.2)
+    
+    # Verifica se janela diminuiu
+    if len(janelas_observadas) >= 2:
+        if janelas_observadas[-1] < janelas_observadas[0]:
+            print(f"  ✓ Controle de fluxo funcionando! Janela diminuiu: {janelas_observadas[0]}b → {janelas_observadas[-1]}b")
+        else:
+            print(f"  ✗ Janela não diminuiu como esperado")
+    
+    # Teste 3.3: Esvaziar o buffer enviando o pacote que faltava
+    print("\n[Teste 3.3] Esvaziando buffer enviando o pacote que faltava...")
+    print("Observação: Janela deve AUMENTAR quando buffer esvazia")
+    
+    pkt = Packet(seq_num=primeiro_seq, ack_num=0, flags=0, window=0, payload=primeiro_payload)
+    print(f"  → Enviando pacote 1 (seq={primeiro_seq}) - O QUE FALTAVA!")
+    sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+    
+    try:
+        data, addr = sock.recvfrom(BUFFER_SIZE)
+        ack_pkt = Packet.from_bytes(data)
+        print(f"  ← ACK: ack_num={ack_pkt.ack_num}, window={ack_pkt.window}b")
+        
+        if ack_pkt.window == BUFFER_SIZE:
+            print(f"  ✓ Buffer esvaziado! Janela voltou para {BUFFER_SIZE}b")
+        elif ack_pkt.window > janelas_observadas[-1]:
+            print(f"  ✓ Janela aumentou! Era {janelas_observadas[-1]}b, agora {ack_pkt.window}b")
+        else:
+            print(f"  ! Janela={ack_pkt.window}b")
+            
+    except socket.timeout:
+        print("  ✗ Timeout")
+    
+    # Teste 3.4: Simulação de cliente respeitando a janela
+    print("\n[Teste 3.4] Simulando cliente que RESPEITA a janela...")
+    print("Observação: Cliente não deve enviar mais que a janela permite")
+    
+    base_seq = primeiro_seq + (num_pacotes * tamanho_payload)
+    
+    # Consulta janela atual
+    msg_teste = b"X" * 10
+    pkt = Packet(seq_num=base_seq, ack_num=0, flags=0, window=0, payload=msg_teste)
+    sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+    
+    try:
+        data, addr = sock.recvfrom(BUFFER_SIZE)
+        ack_pkt = Packet.from_bytes(data)
+        janela_servidor = ack_pkt.window
+        base_seq += len(msg_teste)
+        
+        print(f"  Janela do servidor: {janela_servidor}b")
+        print(f"  Cliente pode enviar até {janela_servidor}b sem ACK")
+        
+        # Simula envio respeitando a janela
+        tamanho_pacote = 100
+        max_pacotes = janela_servidor // tamanho_pacote
+        
+        print(f"  → Enviando {max_pacotes} pacotes de {tamanho_pacote}b (total={max_pacotes * tamanho_pacote}b)")
+        
+        for i in range(max_pacotes):
+            payload = bytes([i]) * tamanho_pacote
+            pkt = Packet(seq_num=base_seq, ack_num=0, flags=0, window=0, payload=payload)
+            sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+            
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            base_seq += len(payload)
+        
+        print(f"  ✓ Cliente enviou {max_pacotes} pacotes respeitando janela de {janela_servidor}b")
+        
+    except socket.timeout:
+        print("  ✗ Timeout")
+    
+    # Teste 3.5: ESTOURAR o limite do buffer (cliente mal comportado)
+    print("\n[Teste 3.5] ⚠️  TESTE DE OVERFLOW - Cliente NÃO respeita janela...")
+    print("Observação: Envia mais dados que o buffer suporta (>1024b)")
+    
+    base_seq = base_seq  # Continua do teste anterior
+    
+    # Criar 25 pacotes de 50 bytes = 1250 bytes (MAIOR que BUFFER_SIZE=1024)
+    num_pacotes_overflow = 25
+    tamanho_payload_overflow = 50
+    total_bytes = num_pacotes_overflow * tamanho_payload_overflow
+    
+    print(f"  Cliente malicioso vai enviar {num_pacotes_overflow} pacotes de {tamanho_payload_overflow}b")
+    print(f"  Total: {total_bytes}b (Buffer do servidor: {BUFFER_SIZE}b)")
+    print(f"  ⚠️  OVERFLOW esperado: {total_bytes - BUFFER_SIZE}b extras!")
+    
+    # Guardar primeiro pacote para enviar por último (forçar buffer cheio)
+    primeiro_seq_overflow = base_seq
+    primeiro_payload_overflow = b"FIRST" * 10  # 50 bytes
+    
+    janelas_overflow = []
+    
+    # Enviar pacotes 2 a 25 (pular o primeiro para encher buffer)
+    for i in range(1, num_pacotes_overflow):
+        seq = base_seq + (i * tamanho_payload_overflow)
+        payload = bytes([ord('X') + (i % 20)]) * tamanho_payload_overflow
+        pkt = Packet(seq_num=seq, ack_num=0, flags=0, window=0, payload=payload)
+        
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        try:
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            janelas_overflow.append(ack_pkt.window)
+            
+            # Mostrar apenas alguns para não poluir
+            if i <= 3 or i >= num_pacotes_overflow - 2 or ack_pkt.window <= 100:
+                bytes_buffer = BUFFER_SIZE - ack_pkt.window
+                print(f"  → Pacote {i+1}: buffer~{bytes_buffer}b, janela={ack_pkt.window}b", end="")
+                
+                if ack_pkt.window <= 50:
+                    print(" ⚠️  JANELA CRÍTICA!")
+                elif ack_pkt.window == 0:
+                    print(" 🛑 BUFFER CHEIO! (janela=0)")
+                else:
+                    print()
+            elif i == 4:
+                print("  ... (enviando mais pacotes) ...")
+                
+        except socket.timeout:
+            print(f"  ✗ Timeout no pacote {i+1}")
+        
+        time.sleep(0.1)
+    
+    print(f"\n  📊 Análise do overflow:")
+    if len(janelas_overflow) > 0:
+        janela_min = min(janelas_overflow)
+        janela_max = max(janelas_overflow)
+        buffer_max = BUFFER_SIZE - janela_min
+        
+        print(f"  • Janela inicial: {janela_max}b")
+        print(f"  • Janela mínima alcançada: {janela_min}b")
+        print(f"  • Buffer máximo usado: {buffer_max}b / {BUFFER_SIZE}b")
+        
+        if janela_min == 0:
+            print(f"  🛑 BUFFER ESTOURADO! Servidor rejeitando pacotes!")
+        elif janela_min < 100:
+            print(f"  ⚠️  Buffer quase cheio! Janela crítica.")
+        
+        if buffer_max > BUFFER_SIZE:
+            print(f"  ⚠️  Cliente tentou enviar mais que o buffer suporta!")
+        
+        print(f"\n  ✓ Teste demonstrou comportamento de overflow do buffer")
+    
+    sock.close()
     print("\n" + "="*70)
+    print("TESTE QUESTÃO 3 CONCLUÍDO")
+    print("="*70)
 
 
 # =============================================================================
@@ -329,7 +553,7 @@ def menu_testes():
         print("="*70)
         print("1. Questão 1 - Entrega ordenada de pacotes")
         print("2. Questão 2 - Confirmação acumulativa (ACK)")
-        print("3. Questão 3 - [A definir]")
+        print("3. Questão 3 - Controle de fluxo (janela do receptor)")
         print("4. Executar todos os testes")
         print("0. Sair")
         print("="*70)
