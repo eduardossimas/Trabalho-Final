@@ -30,51 +30,107 @@ def teste_questao_1():
     
     # Teste 1.1: Envio de pacotes em ordem
     print("\n[Teste 1.1] Enviando pacotes em ordem sequencial...")
-    base_seq = 1000
+    base_seq = 100  # Começa em 100, como esperado pelo servidor
     pacotes_enviados = []
     
     for i in range(5):
         msg = f"Pacote {i+1} - Dados em ordem".encode()
         pkt = Packet(seq_num=base_seq, ack_num=0, flags=0, window=0, payload=msg)
         
-        print(f"  → Enviando seq={base_seq}: {msg.decode()}")
-        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
-        pacotes_enviados.append((base_seq, msg))
-        
-        try:
-            data, addr = sock.recvfrom(BUFFER_SIZE)
-            ack_pkt = Packet.from_bytes(data)
-            print(f"  ← Recebido ACK: ack_num={ack_pkt.ack_num}")
-        except socket.timeout:
-            print("  ✗ Timeout ao aguardar ACK")
+        # Retransmissão com até 3 tentativas
+        max_retries = 3
+        for attempt in range(max_retries):
+            if attempt > 0:
+                print(f"  ↻ Retransmitindo (tentativa {attempt + 1}/{max_retries})...")
+            else:
+                print(f"  → Enviando seq={base_seq}: {msg.decode()}")
+            
+            sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+            
+            try:
+                data, addr = sock.recvfrom(BUFFER_SIZE)
+                ack_pkt = Packet.from_bytes(data)
+                print(f"  ← Recebido ACK: ack_num={ack_pkt.ack_num}")
+                break  # ACK recebido, sai do loop de retransmissão
+            except socket.timeout:
+                if attempt < max_retries - 1:
+                    print(f"  ✗ Timeout! Tentando novamente...")
+                else:
+                    print(f"  ✗ Timeout após {max_retries} tentativas!")
         
         base_seq += len(msg)
         time.sleep(0.5)
     
     # Teste 1.2: Envio de pacotes fora de ordem (simulando rede)
     print("\n[Teste 1.2] Enviando pacotes FORA de ordem...")
+    print("Observação: Servidor deve reordenar e entregar na ordem correta à aplicação")
     
-    # Preparar pacotes
-    seq_nums = [2000, 2100, 2050, 2150, 2025]  # Propositalmente fora de ordem
-    for i, seq in enumerate(seq_nums):
-        msg = f"Pacote {i+1} - seq={seq}".encode()
+    # Criar 5 pacotes CONSECUTIVOS com seq_num calculado pelo tamanho real
+    # Base: próximo seq após teste 1.1 (~225)
+    mensagens = [
+        "Pacote 1",
+        "Pacote 2", 
+        "Pacote 3",
+        "Pacote 4",
+        "Pacote 5"
+    ]
+    
+    # Calcular seq_num correto para cada pacote
+    pacotes_ordenados = []
+    seq_atual = base_seq  # Continua de onde parou o teste 1.1
+    
+    for i, msg_texto in enumerate(mensagens):
+        msg = msg_texto.encode()
+        pacotes_ordenados.append({
+            'seq': seq_atual,
+            'msg': msg,
+            'descricao': f"{msg_texto} (seq={seq_atual})"
+        })
+        seq_atual += len(msg)
+    
+    # Embaralhar a ORDEM de envio (mas não os seq_nums!)
+    # Ordem original: 0, 1, 2, 3, 4
+    # Ordem embaralhada: 1, 3, 0, 4, 2
+    ordem_envio = [1, 3, 0, 4, 2]
+    
+    print(f"Enviando na ordem embaralhada: {[mensagens[i] for i in ordem_envio]}")
+    
+    for idx in ordem_envio:
+        pkt_info = pacotes_ordenados[idx]
+        seq = pkt_info['seq']
+        msg = pkt_info['msg']
         pkt = Packet(seq_num=seq, ack_num=0, flags=0, window=0, payload=msg)
         
-        print(f"  → Enviando seq={seq}: {msg.decode()}")
-        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
-        
-        try:
-            data, addr = sock.recvfrom(BUFFER_SIZE)
-            ack_pkt = Packet.from_bytes(data)
-            print(f"  ← Recebido ACK: ack_num={ack_pkt.ack_num}")
-        except socket.timeout:
-            print("  ✗ Timeout ao aguardar ACK")
+        # Retransmissão com até 3 tentativas
+        max_retries = 3
+        for attempt in range(max_retries):
+            if attempt > 0:
+                print(f"  ↻ Retransmitindo seq={seq} (tentativa {attempt + 1}/{max_retries})...")
+            else:
+                print(f"  → Enviando seq={seq}: {pkt_info['descricao']}")
+            
+            sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+            
+            try:
+                data, addr = sock.recvfrom(BUFFER_SIZE)
+                ack_pkt = Packet.from_bytes(data)
+                print(f"  ← Recebido ACK: ack_num={ack_pkt.ack_num}")
+                break  # ACK recebido, sai do loop de retransmissão
+            except socket.timeout:
+                if attempt < max_retries - 1:
+                    print(f"  ✗ Timeout! Tentando novamente...")
+                else:
+                    print(f"  ✗ Timeout após {max_retries} tentativas!")
         
         time.sleep(0.5)
     
+    # Atualiza base_seq para o próximo teste
+    base_seq = seq_atual
+    
     # Teste 1.3: Pacotes duplicados (mesmo número de sequência)
     print("\n[Teste 1.3] Testando pacotes duplicados...")
-    seq_dup = 3000
+    print("Observação: Servidor deve descartar duplicatas e não reprocessar")
+    seq_dup = 100  # Reutilizando um seq_num já processado no teste 1.1
     msg_dup = "Pacote duplicado para teste".encode()
     
     for i in range(3):
