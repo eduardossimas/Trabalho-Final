@@ -16,7 +16,7 @@ def run_server():
 
     print(f"Servidor ouvindo e aguardando a partir do Seq={expected_seq}...")
     
-    LOSS_PROBABILITY = 0.1 
+    LOSS_PROBABILITY = 0.05
 
     while True:
         try:

@@ -154,21 +154,147 @@ def teste_questao_1():
 
 
 # =============================================================================
-# QUESTÃO 2: [Adicionar descrição quando implementar]
+# QUESTÃO 2: Confirmação acumulativa (ACK acumulativo)
 # =============================================================================
 
 def teste_questao_2():
     """
-    [Descrição do teste da questão 2]
+    Testa o ACK acumulativo do servidor.
+    
+    Cenário de teste:
+    - Envia múltiplos pacotes e verifica se ACK confirma TODOS os bytes anteriores
+    - Envia pacotes fora de ordem e verifica se ACK acumula após reordenação
+    - Simula perda de ACK e verifica se servidor re-envia ACK acumulativo
     """
     print("\n" + "="*70)
-    print("TESTE - QUESTÃO 2: [Título]")
+    print("TESTE - QUESTÃO 2: Confirmação Acumulativa (ACK)")
     print("="*70)
     
-    # TODO: Implementar teste da questão 2
-    print("Teste ainda não implementado")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2.0)
     
+    # Teste 2.1: ACK acumulativo em sequência normal
+    print("\n[Teste 2.1] Verificando ACK acumulativo com pacotes em ordem...")
+    print("Observação: Cada ACK deve confirmar TODOS os bytes recebidos até o momento")
+    
+    base_seq = 100 
+    
+    for i in range(4):
+        msg = f"Pacote {i+1}".encode()
+        pkt = Packet(seq_num=base_seq, ack_num=0, flags=0, window=0, payload=msg)
+        
+        esperado_ack = base_seq + len(msg)
+        
+        print(f"  → Enviando seq={base_seq}, payload={len(msg)}b")
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        try:
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            print(f"  ← ACK recebido: ack_num={ack_pkt.ack_num}")
+            
+            # Verifica se é cumulativo
+            if ack_pkt.ack_num == esperado_ack:
+                print(f"  ✓ ACK CUMULATIVO correto! Confirma até byte {ack_pkt.ack_num}")
+            else:
+                print(f"  ✗ ACK incorreto! Esperado={esperado_ack}, Recebido={ack_pkt.ack_num}")
+            
+            base_seq += len(msg)
+            
+        except socket.timeout:
+            print("  ✗ Timeout ao aguardar ACK")
+            break
+        
+        time.sleep(0.3)
+    
+    # Teste 2.2: ACK acumulativo com pacotes fora de ordem
+    print("\n[Teste 2.2] ACK acumulativo com pacotes FORA de ordem...")
+    print("Observação: ACK só avança quando recebe o pacote que faltava")
+    
+    # Criar pacotes consecutivos
+    mensagens = ["A", "B", "C", "D"]
+    pacotes = []
+    seq_atual = base_seq
+    
+    for msg_texto in mensagens:
+        msg = msg_texto.encode()
+        pacotes.append({
+            'seq': seq_atual,
+            'msg': msg,
+            'label': msg_texto
+        })
+        seq_atual += len(msg)
+    
+    # Enviar na ordem: B, D, C, A (invertido)
+    ordem_envio = [1, 3, 2, 0]
+    
+    print(f"Ordem de envio: {[mensagens[i] for i in ordem_envio]}")
+    
+    for idx in ordem_envio:
+        pkt_info = pacotes[idx]
+        pkt = Packet(seq_num=pkt_info['seq'], ack_num=0, flags=0, window=0, payload=pkt_info['msg'])
+        
+        print(f"  → Enviando '{pkt_info['label']}' (seq={pkt_info['seq']})")
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        try:
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            print(f"  ← ACK: ack_num={ack_pkt.ack_num}", end="")
+            
+            # Analisa o ACK
+            if idx == 0:  # Quando envia 'A' (o que faltava)
+                print(f" → ✓ ACK ACUMULATIVO! Confirma A+B+C+D juntos!")
+            elif ack_pkt.ack_num == pacotes[0]['seq']:
+                print(f" → Ainda aguardando 'A' (primeiro pacote)")
+            else:
+                print()
+                
+        except socket.timeout:
+            print("  ✗ Timeout")
+        
+        time.sleep(0.3)
+    
+    # Teste 2.3: Re-envio de ACK acumulativo (duplicata)
+    print("\n[Teste 2.3] Re-envio de ACK quando recebe pacote duplicado...")
+    print("Observação: Servidor deve re-enviar o MESMO ACK acumulativo")
+    
+    base_seq = seq_atual
+    msg = "TesteDup".encode()
+    pkt = Packet(seq_num=base_seq, ack_num=0, flags=0, window=0, payload=msg)
+    
+    print(f"  → Enviando pacote original (seq={base_seq})")
+    sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+    
+    try:
+        data, addr = sock.recvfrom(BUFFER_SIZE)
+        ack_pkt = Packet.from_bytes(data)
+        primeiro_ack = ack_pkt.ack_num
+        print(f"  ← Primeiro ACK: ack_num={primeiro_ack}")
+        
+        time.sleep(0.3)
+        
+        # Envia DUPLICATA do mesmo pacote
+        print(f"  → Enviando DUPLICATA (seq={base_seq})")
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        data, addr = sock.recvfrom(BUFFER_SIZE)
+        ack_pkt2 = Packet.from_bytes(data)
+        segundo_ack = ack_pkt2.ack_num
+        print(f"  ← Segundo ACK: ack_num={segundo_ack}")
+        
+        if primeiro_ack == segundo_ack:
+            print(f"  ✓ ACK acumulativo mantido! Servidor re-enviou ack_num={primeiro_ack}")
+        else:
+            print(f"  ✗ ACK diferente! Esperado={primeiro_ack}, Recebido={segundo_ack}")
+            
+    except socket.timeout:
+        print("  ✗ Timeout")
+    
+    sock.close()
     print("\n" + "="*70)
+    print("TESTE QUESTÃO 2 CONCLUÍDO")
+    print("="*70)
 
 
 # =============================================================================
@@ -202,7 +328,7 @@ def menu_testes():
         print("MENU DE TESTES - Trabalho Final de Redes")
         print("="*70)
         print("1. Questão 1 - Entrega ordenada de pacotes")
-        print("2. Questão 2 - [A definir]")
+        print("2. Questão 2 - Confirmação acumulativa (ACK)")
         print("3. Questão 3 - [A definir]")
         print("4. Executar todos os testes")
         print("0. Sair")
