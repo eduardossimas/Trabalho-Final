@@ -12,6 +12,7 @@ MSS = 1000  # Tamanho máximo do payload
 SYN = 0b00000001
 ACK = 0b00000010
 FIN = 0b00000100
+ENC = 0b00001000  # Flag indicando pacote criptografado
 
 # Estados da Conexão
 STATE_CLOSED = 0
@@ -22,18 +23,37 @@ STATE_ESTABLISHED = 4
 STATE_FIN_WAIT = 5
 
 class Security:
-    """Implementa criptografia simples (XOR) para o Requisito 5"""
+    """Implementa criptografia simples (XOR) para Questão 5."""
+    
     def __init__(self, key=b'Redes2026'):
-        # A chave deve ser bytes. Repetimos a chave para cobrir o payload
         self.key = key
-
-    def encrypt_decrypt(self, data):
-        # Cifra XOR simples: (A ^ B) ^ B = A
+        self.encryption_enabled = False
+    
+    def encrypt(self, data):
+        """Criptografa dados com XOR."""
+        if not self.encryption_enabled or not data:
+            return data
+        
         output = bytearray()
         key_len = len(self.key)
         for i, byte in enumerate(data):
             output.append(byte ^ self.key[i % key_len])
         return bytes(output)
+    
+    def decrypt(self, data):
+        """Descriptografa dados (XOR é simétrico)."""
+        return self.encrypt(data)  # XOR: (A ^ B) ^ B = A
+    
+    def generate_key(self):
+        """Gera chave aleatória de 8 bytes para demonstração."""
+        import random
+        self.key = bytes([random.randint(0, 255) for _ in range(8)])
+        return self.key
+    
+    def set_key(self, key):
+        """Define chave de criptografia."""
+        self.key = key
+        self.encryption_enabled = True
 
 class Packet:
     def __init__(self, seq_num, ack_num, flags, window, payload=b''):
@@ -65,4 +85,5 @@ class Packet:
         if self.flags & SYN: flag_str.append("SYN")
         if self.flags & ACK: flag_str.append("ACK")
         if self.flags & FIN: flag_str.append("FIN")
+        if self.flags & ENC: flag_str.append("ENC")
         return f"[Seq={self.seq_num} | Ack={self.ack_num} | Win={self.window} | Flags={'|'.join(flag_str)} | Payload={len(self.payload)}b]"
