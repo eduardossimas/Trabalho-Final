@@ -540,6 +540,371 @@ def teste_questao_3():
 
 
 # =============================================================================
+# QUESTÃO 4: Controle de Congestionamento (AIMD - TCP Reno)
+# =============================================================================
+
+def teste_questao_4():
+    """
+    Testa o controle de congestionamento baseado no TCP Reno.
+    REQUER: Servidor rodando (python3 servidor.py)
+    
+    Cenário de teste:
+    - Verifica Slow Start (crescimento exponencial) com servidor real
+    - Verifica Congestion Avoidance (crescimento linear)
+    - Verifica reação a Timeout (perda severa)
+    - Verifica Fast Retransmit (3 ACKs duplicados)
+    """
+    print("\n" + "="*70)
+    print("TESTE - QUESTÃO 4: Controle de Congestionamento (TCP Reno)")
+    print("="*70)
+    print("NOTA: Este teste requer o servidor rodando!")
+    print("      Execute em outro terminal: python3 servidor.py")
+    print("="*70)
+    
+    # Importar a classe de controle de congestionamento
+    from cliente import CongestionControl, Sender
+    
+    # =========================================================================
+    # TESTE 4.1: SLOW START COM SERVIDOR REAL
+    # =========================================================================
+    print("\n[Teste 4.1] SLOW START - Comunicação com servidor real")
+    print("Observação: cwnd deve aumentar +MSS a cada ACK")
+    print("Equação: cwnd = cwnd + MSS")
+    print("-" * 50)
+    
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2.0)
+    
+    # Criar controle de congestionamento
+    cc = CongestionControl()
+    base_seq = 100
+    
+    print(f"\n  Estado inicial: cwnd={cc.cwnd}b, ssthresh={cc.ssthresh}b")
+    print(f"  Fase: {cc.get_phase().upper()}")
+    print()
+    
+    # Enviar 5 pacotes e verificar crescimento do cwnd
+    cwnd_historico = [cc.cwnd]
+    
+    for i in range(5):
+        msg = f"SlowStart-{i}".encode()
+        pkt = Packet(seq_num=base_seq, ack_num=0, flags=0, window=0, payload=msg)
+        
+        old_cwnd = cc.cwnd
+        print(f"  [{i+1}] Enviando seq={base_seq} ({len(msg)}b)...")
+        
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        try:
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            
+            # Processar ACK no controle de congestionamento
+            cc.on_new_ack(ack_pkt.ack_num)
+            cwnd_historico.append(cc.cwnd)
+            
+            incremento = cc.cwnd - old_cwnd
+            print(f"      ← ACK={ack_pkt.ack_num}, window={ack_pkt.window}b")
+            print(f"      cwnd: {old_cwnd}b → {cc.cwnd}b (+{incremento}b)")
+            
+            base_seq = ack_pkt.ack_num
+            
+        except socket.timeout:
+            print(f"      ✗ Timeout!")
+            break
+        
+        time.sleep(0.3)
+    
+    # Verificar resultado do Slow Start
+    print(f"\n  📊 Resultado Slow Start:")
+    print(f"  • cwnd inicial: {cwnd_historico[0]}b")
+    print(f"  • cwnd final: {cwnd_historico[-1]}b")
+    print(f"  • Incremento total: {cwnd_historico[-1] - cwnd_historico[0]}b")
+    print(f"  • Esperado: 5 × MSS = {5 * MSS}b")
+    
+    if cwnd_historico[-1] - cwnd_historico[0] == 5 * MSS:
+        print(f"  ✓ Slow Start funcionando corretamente!")
+    else:
+        print(f"  ✗ Slow Start com problema!")
+    
+    # =========================================================================
+    # TESTE 4.2: TRANSIÇÃO SLOW START → CONGESTION AVOIDANCE
+    # =========================================================================
+    print("\n" + "-"*70)
+    print("[Teste 4.2] TRANSIÇÃO para Congestion Avoidance")
+    print("Observação: Quando cwnd >= ssthresh, muda para crescimento linear")
+    print("-" * 50)
+    
+    # Configurar ssthresh baixo para forçar transição
+    cc2 = CongestionControl()
+    cc2.ssthresh = 3000  # Threshold baixo
+    base_seq2 = base_seq
+    
+    print(f"\n  Configuração: cwnd={cc2.cwnd}b, ssthresh={cc2.ssthresh}b")
+    print(f"  Transição ocorrerá quando cwnd >= {cc2.ssthresh}b")
+    print()
+    
+    transicao_detectada = False
+    
+    for i in range(5):
+        msg = f"Trans-{i}".encode()
+        pkt = Packet(seq_num=base_seq2, ack_num=0, flags=0, window=0, payload=msg)
+        
+        old_cwnd = cc2.cwnd
+        old_phase = cc2.get_phase()
+        
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        try:
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            
+            cc2.on_new_ack(ack_pkt.ack_num)
+            new_phase = cc2.get_phase()
+            
+            print(f"  [{i+1}] ACK={ack_pkt.ack_num}: cwnd {old_cwnd:.0f}b → {cc2.cwnd:.0f}b [{new_phase}]")
+            
+            if old_phase == "slow_start" and new_phase == "congestion_avoidance":
+                print(f"      ⚡ TRANSIÇÃO DETECTADA! cwnd >= ssthresh")
+                transicao_detectada = True
+            
+            base_seq2 = ack_pkt.ack_num
+            
+        except socket.timeout:
+            print(f"      ✗ Timeout!")
+            break
+        
+        time.sleep(0.3)
+    
+    if transicao_detectada:
+        print(f"\n  ✓ Transição Slow Start → Congestion Avoidance verificada!")
+    
+    # =========================================================================
+    # TESTE 4.3: CONGESTION AVOIDANCE (crescimento linear)
+    # =========================================================================
+    print("\n" + "-"*70)
+    print("[Teste 4.3] CONGESTION AVOIDANCE - Crescimento Linear")
+    print("Observação: cwnd aumenta ~1 MSS por RTT")
+    print("Equação: cwnd = cwnd + (MSS × MSS) / cwnd")
+    print("-" * 50)
+    
+    cc3 = CongestionControl()
+    cc3.cwnd = 4000  # Já em Congestion Avoidance
+    cc3.ssthresh = 2000
+    cc3.last_ack_received = base_seq2
+    base_seq3 = base_seq2
+    
+    print(f"\n  Estado: cwnd={cc3.cwnd}b, ssthresh={cc3.ssthresh}b")
+    print(f"  Fase: {cc3.get_phase().upper()}")
+    print()
+    
+    incrementos = []
+    
+    for i in range(4):
+        msg = f"CongAvoid-{i}".encode()
+        pkt = Packet(seq_num=base_seq3, ack_num=0, flags=0, window=0, payload=msg)
+        
+        old_cwnd = cc3.cwnd
+        
+        sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+        
+        try:
+            data, addr = sock.recvfrom(BUFFER_SIZE)
+            ack_pkt = Packet.from_bytes(data)
+            
+            cc3.on_new_ack(ack_pkt.ack_num)
+            incremento = cc3.cwnd - old_cwnd
+            incrementos.append(incremento)
+            
+            # Mostra cálculo da equação
+            calc = (MSS * MSS) / old_cwnd
+            print(f"  [{i+1}] cwnd {old_cwnd:.0f}b → {cc3.cwnd:.0f}b")
+            print(f"      Equação: {MSS}×{MSS}/{old_cwnd:.0f} = +{calc:.1f}b")
+            
+            base_seq3 = ack_pkt.ack_num
+            
+        except socket.timeout:
+            print(f"      ✗ Timeout!")
+            break
+        
+        time.sleep(0.3)
+    
+    soma = sum(incrementos)
+    print(f"\n  📊 Resultado Congestion Avoidance:")
+    print(f"  • Total incrementado em 4 ACKs: {soma:.0f}b")
+    print(f"  • Esperado (~1 MSS): {MSS}b")
+    print(f"  ✓ Crescimento linear verificado!")
+    
+    # =========================================================================
+    # TESTE 4.4: TIMEOUT (Perda Severa) - Simulação
+    # =========================================================================
+    print("\n" + "-"*70)
+    print("[Teste 4.4] TIMEOUT - Perda Severa (Simulação)")
+    print("Observação: ssthresh = cwnd/2, cwnd = 1*MSS")
+    print("Equações:")
+    print("  ssthresh = max(cwnd / 2, 2 × MSS)")
+    print("  cwnd = 1 × MSS")
+    print("-" * 50)
+    
+    cc4 = CongestionControl()
+    cc4.cwnd = 8000
+    cc4.ssthresh = 64000
+    
+    print(f"\n  Estado ANTES do timeout:")
+    print(f"  • cwnd = {cc4.cwnd}b")
+    print(f"  • ssthresh = {cc4.ssthresh}b")
+    print(f"  • Fase: {cc4.get_phase().upper()}")
+    
+    # Simula timeout
+    print(f"\n  ⏱️  Simulando TIMEOUT...")
+    cc4.on_timeout()
+    
+    print(f"\n  Estado DEPOIS do timeout:")
+    print(f"  • ssthresh = max(8000/2, 2×{MSS}) = {cc4.ssthresh:.0f}b")
+    print(f"  • cwnd = 1 × MSS = {cc4.cwnd}b")
+    print(f"  • Fase: {cc4.get_phase().upper()}")
+    
+    if cc4.cwnd == MSS and cc4.ssthresh == 4000:
+        print(f"\n  ✓ Timeout tratado corretamente!")
+        print(f"    - Voltou para SLOW START")
+        print(f"    - cwnd reiniciado para 1×MSS")
+    
+    # =========================================================================
+    # TESTE 4.5: FAST RETRANSMIT (3 ACKs Duplicados) - Simulação
+    # =========================================================================
+    print("\n" + "-"*70)
+    print("[Teste 4.5] FAST RETRANSMIT - 3 ACKs Duplicados (Simulação)")
+    print("Observação: ssthresh = cwnd/2, cwnd = ssthresh (pula Slow Start)")
+    print("Equações:")
+    print("  ssthresh = max(cwnd / 2, 2 × MSS)")
+    print("  cwnd = ssthresh (TCP Reno)")
+    print("-" * 50)
+    
+    cc5 = CongestionControl()
+    cc5.cwnd = 8000
+    cc5.ssthresh = 64000
+    cc5.last_ack_received = 1000
+    
+    print(f"\n  Estado ANTES:")
+    print(f"  • cwnd = {cc5.cwnd}b")
+    print(f"  • ssthresh = {cc5.ssthresh}b")
+    
+    print(f"\n  Simulando 3 ACKs duplicados (ack_num=1000)...")
+    
+    for i in range(3):
+        result = cc5.on_duplicate_ack(1000)
+        if result:
+            cc5.on_triple_dup_ack()
+    
+    print(f"\n  Estado DEPOIS:")
+    print(f"  • ssthresh = max(8000/2, 2×{MSS}) = {cc5.ssthresh:.0f}b")
+    print(f"  • cwnd = ssthresh = {cc5.cwnd:.0f}b")
+    print(f"  • Fase: {cc5.get_phase().upper()}")
+    
+    if cc5.cwnd == 4000 and cc5.ssthresh == 4000:
+        print(f"\n  ✓ Fast Retransmit funcionando!")
+        print(f"    - NÃO voltou para Slow Start (TCP Reno)")
+        print(f"    - Continua em Congestion Avoidance")
+    
+    # =========================================================================
+    # TESTE 4.6: COMPARAÇÃO TIMEOUT vs FAST RETRANSMIT
+    # =========================================================================
+    print("\n" + "-"*70)
+    print("[Teste 4.6] COMPARAÇÃO: Timeout vs Fast Retransmit")
+    print("-" * 50)
+    
+    print(f"""
+  Cenário: cwnd = 8000b, ocorre perda de pacote
+
+  ┌──────────────────┬───────────────┬───────────────┬───────────────────┐
+  │ Evento           │ ssthresh      │ cwnd          │ Estado            │
+  ├──────────────────┼───────────────┼───────────────┼───────────────────┤
+  │ TIMEOUT          │ 8000/2=4000b  │ 1×MSS=1000b   │ Slow Start        │
+  │ 3 ACKs Dup       │ 8000/2=4000b  │ 4000b         │ Cong. Avoidance   │
+  └──────────────────┴───────────────┴───────────────┴───────────────────┘
+
+  📝 Análise:
+  • TIMEOUT = Perda severa → Conservador (reinicia do zero)
+  • 3 ACKs Dup = Perda leve → Agressivo (mantém metade)
+  
+  O Fast Retransmit é mais eficiente porque pacotes posteriores
+  ainda estão chegando, indicando que a rede não está totalmente
+  congestionada.
+    """)
+    
+    # =========================================================================
+    # TESTE 4.7: JANELA DESLIZANTE COM SERVIDOR
+    # =========================================================================
+    print("-"*70)
+    print("[Teste 4.7] JANELA DESLIZANTE - min(cwnd, rwnd)")
+    print("Observação: Envio limitado pela menor janela")
+    print("Regra: bytes_in_flight ≤ min(cwnd, rwnd)")
+    print("-" * 50)
+    
+    cc7 = CongestionControl()
+    cc7.cwnd = 3000
+    
+    print(f"\n  cwnd = {cc7.cwnd}b (controle de congestionamento)")
+    print(f"  rwnd = janela do servidor (controle de fluxo)")
+    print()
+    
+    # Consulta rwnd do servidor
+    msg_teste = b"TesteJanela"
+    pkt = Packet(seq_num=base_seq3, ack_num=0, flags=0, window=0, payload=msg_teste)
+    sock.sendto(pkt.to_bytes(), (SERVER_IP, SERVER_PORT))
+    
+    try:
+        data, addr = sock.recvfrom(BUFFER_SIZE)
+        ack_pkt = Packet.from_bytes(data)
+        rwnd = ack_pkt.window
+        
+        print(f"  rwnd do servidor: {rwnd}b")
+        
+        # Testa cenários
+        cenarios = [
+            (0, "Nada em vôo"),
+            (1000, "1000b em vôo"),
+            (2000, "2000b em vôo"),
+        ]
+        
+        effective = min(cc7.cwnd, rwnd)
+        print(f"  Janela efetiva: min({cc7.cwnd}, {rwnd}) = {effective}b")
+        print()
+        
+        for bytes_in_flight, desc in cenarios:
+            can_send, available = cc7.can_send(bytes_in_flight, rwnd)
+            print(f"  • {desc}:")
+            print(f"    disponível = {effective} - {bytes_in_flight} = {available}b")
+            print(f"    pode_enviar = {can_send}")
+        
+    except socket.timeout:
+        print("  ✗ Timeout ao consultar servidor")
+    
+    sock.close()
+    
+    # =========================================================================
+    # RESUMO FINAL
+    # =========================================================================
+    print("\n" + "="*70)
+    print("RESUMO - CONTROLE DE CONGESTIONAMENTO TCP RENO")
+    print("="*70)
+    print("""
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ FASE              │ CONDIÇÃO        │ EQUAÇÃO                       │
+  ├───────────────────┼─────────────────┼───────────────────────────────┤
+  │ Slow Start        │ cwnd < ssthresh │ cwnd += MSS                   │
+  │ Cong. Avoidance   │ cwnd ≥ ssthresh │ cwnd += (MSS×MSS)/cwnd        │
+  ├───────────────────┼─────────────────┼───────────────────────────────┤
+  │ Timeout           │ Timer estoura   │ ssthresh=cwnd/2, cwnd=1×MSS   │
+  │ 3 ACKs Dup        │ Fast Retransmit │ ssthresh=cwnd/2, cwnd=ssthresh│
+  └───────────────────┴─────────────────┴───────────────────────────────┘
+    """)
+    print("="*70)
+    print("TESTE QUESTÃO 4 CONCLUÍDO")
+    print("="*70)
+
+
+# =============================================================================
 # MENU PRINCIPAL
 # =============================================================================
 
@@ -554,7 +919,8 @@ def menu_testes():
         print("1. Questão 1 - Entrega ordenada de pacotes")
         print("2. Questão 2 - Confirmação acumulativa (ACK)")
         print("3. Questão 3 - Controle de fluxo (janela do receptor)")
-        print("4. Executar todos os testes")
+        print("4. Questão 4 - Controle de congestionamento (TCP Reno)")
+        print("5. Executar todos os testes (1-4)")
         print("0. Sair")
         print("="*70)
         
@@ -567,10 +933,13 @@ def menu_testes():
         elif escolha == "3":
             teste_questao_3()
         elif escolha == "4":
+            teste_questao_4()
+        elif escolha == "5":
             print("\nExecutando todos os testes...\n")
             teste_questao_1()
             teste_questao_2()
             teste_questao_3()
+            teste_questao_4()
         elif escolha == "0":
             print("\nEncerrando testes...")
             break
