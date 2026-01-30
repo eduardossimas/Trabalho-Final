@@ -601,12 +601,12 @@ def run_client(use_encryption=False, benchmark=False):
         mensagens = [f"Pacote {i:05d}: {'X'*450}" for i in range(10000)]
     else:
         # Modo normal com 8 mensagens para demonstração
-        mensagens = [f"Mensagem {i+1}: Dados de teste para transmissão" for i in range(8)]
+        mensagens = [f"Mensagem {i+1}: Dados de teste para transmissao" for i in range(8)]
     
     try:
         sender.send_data(mensagens)
     except KeyboardInterrupt:
-        print("\n[SENDER] Transmissão interrompida")
+        print("\n[SENDER] Transmissao interrompida")
     finally:
         sender.close()
 
